@@ -41,3 +41,6 @@ Retrieve API references and limits from:
 * Cloudflare workers supports local development, more details are in https://developers.cloudflare.com/workers/development-testing/
 * When testing end to end, we should still run the test locally, but it should execute against real resources.
 * Those resources can be local resources: for example a sqlite database. Cloudflare provides a "wrangler" CLI tool which you can use to set up a local database and run the worker locally against that database.
+* Always favor single responsibility principle. A module, file, function should do only one thing.
+* Keep dependencies to a minimum between modules, files, functions as much as possible.
+* Reduce the integration surface so that maintenance is easy.

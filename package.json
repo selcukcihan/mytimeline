@@ -6,7 +6,9 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
-		"test": "vitest",
+		"test": "npm run test:unit",
+		"test:unit": "vitest run test/unit.spec.ts",
+		"test:e2e": "node --env-file=.env ./node_modules/vitest/vitest.mjs run -c vitest.e2e.config.mts test/e2e.real.spec.ts",
 		"cf-typegen": "wrangler types"
 	},
 	"devDependencies": {
@@ -17,6 +19,7 @@
 		"wrangler": "^4.67.0"
 	},
 	"dependencies": {
+		"@cloudflare/puppeteer": "^1.0.6",
 		"agents": "^0.5.0"
 	}
 }

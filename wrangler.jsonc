@@ -12,7 +12,45 @@
 	},
 	"compatibility_flags": [
 		"nodejs_compat"
-	]
+	],
+	"triggers": {
+		"crons": [
+			"0 13 * * *"
+		]
+	},
+	"browser": {
+		"binding": "BROWSER"
+	},
+	"send_email": [
+		{
+			"name": "DIGEST_EMAIL"
+		}
+	],
+	"durable_objects": {
+		"bindings": [
+			{
+				"name": "DIGEST_COORDINATOR",
+				"class_name": "DigestCoordinator"
+			}
+		]
+	},
+	"migrations": [
+		{
+			"tag": "v1",
+			"new_sqlite_classes": [
+				"DigestCoordinator"
+			]
+		}
+	],
+	"vars": {
+		"DIGEST_TOPICS": "ai, cloudflare, startups, devtools",
+		"TIMELINE_URL": "https://x.com/home",
+		"TARGET_TWEET_COUNT": "70",
+		"SCROLL_PASSES": "7",
+		"OPENAI_MODEL": "gpt-4.1-mini",
+		"DIGEST_SENDER": "digest@example.com",
+		"DIGEST_RECIPIENT": "digest@example.com"
+	}
 	/**
 	 * Smart Placement
 	 * https://developers.cloudflare.com/workers/configuration/smart-placement/#smart-placement
