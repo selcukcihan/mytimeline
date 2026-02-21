@@ -48,6 +48,7 @@
 		"TARGET_TWEET_COUNT": "70",
 		"SCROLL_PASSES": "7",
 		"OPENAI_MODEL": "gpt-4.1-mini",
+		"SCHEDULED_DRY_RUN": "0",
 		"DIGEST_SENDER": "digest@example.com",
 		"DIGEST_RECIPIENT": "digest@example.com"
 	}

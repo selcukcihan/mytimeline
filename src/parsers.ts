@@ -28,6 +28,13 @@ export function parseCookieList(rawJson: string | undefined): Array<Record<strin
 
 	try {
 		const parsed = JSON.parse(rawJson);
+		if (typeof parsed === 'string') {
+			const nested = JSON.parse(parsed);
+			if (!Array.isArray(nested)) {
+				return [];
+			}
+			return nested.filter((item) => typeof item === 'object' && item !== null);
+		}
 		if (!Array.isArray(parsed)) {
 			return [];
 		}

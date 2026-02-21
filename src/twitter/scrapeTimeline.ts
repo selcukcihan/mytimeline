@@ -2,8 +2,17 @@ import puppeteer from '@cloudflare/puppeteer';
 import { DEFAULT_TIMELINE_URL } from '../constants';
 import { parseCookieList, parsePositiveInt } from '../parsers';
 import { parseEngagementCount } from '../tweets/scoring';
-import type { RuntimeEnv, Tweet } from '../types';
+import type { RuntimeEnv, ScrapeDiagnostics, Tweet } from '../types';
 import { sleep } from '../utils/time';
+
+export class ScrapeTimelineError extends Error {
+	constructor(
+		message: string,
+		public readonly diagnostics: ScrapeDiagnostics,
+	) {
+		super(message);
+	}
+}
 
 export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[]> {
 	if (!env.BROWSER) {
@@ -13,7 +22,8 @@ export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[
 	const timelineUrl = env.TIMELINE_URL || DEFAULT_TIMELINE_URL;
 	const targetTweets = parsePositiveInt(env.TARGET_TWEET_COUNT, 70);
 	const scrollPasses = parsePositiveInt(env.SCROLL_PASSES, 7);
-	const cookieList = parseCookieList(env.X_SESSION_COOKIES);
+	const rawCookies = env.X_SESSION_COOKIES ?? process.env.X_SESSION_COOKIES;
+	const cookieList = parseCookieList(rawCookies);
 
 	const browser = await puppeteer.launch(env.BROWSER);
 	try {
@@ -23,8 +33,16 @@ export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[
 			await page.setCookie(...cookieList);
 		}
 
-		await page.goto(timelineUrl, { waitUntil: 'networkidle2' });
-		await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30_000 });
+		try {
+			await page.goto(timelineUrl, { waitUntil: 'networkidle2' });
+			await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30_000 });
+		} catch (error) {
+			const diagnostics = await collectDiagnostics(page, rawCookies, cookieList);
+			throw new ScrapeTimelineError(
+				`Failed to load timeline tweets: ${error instanceof Error ? error.message : String(error)}`,
+				diagnostics,
+			);
+		}
 
 		const byId = new Map<string, Tweet>();
 		for (let i = 0; i < scrollPasses; i += 1) {
@@ -46,6 +64,44 @@ export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[
 	} finally {
 		await browser.close();
 	}
+}
+
+async function collectDiagnostics(
+	page: puppeteer.Page,
+	rawCookies: string | undefined,
+	injectedCookies: Array<Record<string, unknown>>,
+): Promise<ScrapeDiagnostics> {
+	let pageTitle = '';
+	let bodySnippet = '';
+
+	try {
+		pageTitle = await page.title();
+	} catch {
+		pageTitle = '';
+	}
+
+	try {
+		bodySnippet = await page.evaluate(() => {
+			const text = document.body?.innerText ?? '';
+			return text.replace(/\s+/g, ' ').slice(0, 2000);
+		});
+	} catch {
+		bodySnippet = '';
+	}
+
+	const injectedCookieNames = injectedCookies
+		.map((cookie) => (typeof cookie.name === 'string' ? cookie.name : ''))
+		.filter(Boolean);
+
+	return {
+		currentUrl: page.url(),
+		pageTitle,
+		bodySnippet,
+		rawCookiePresent: Boolean(rawCookies),
+		rawCookieLength: rawCookies?.length ?? 0,
+		injectedCookieCount: injectedCookieNames.length,
+		injectedCookieNames,
+	};
 }
 
 async function extractTweetsFromPage(page: puppeteer.Page): Promise<Tweet[]> {

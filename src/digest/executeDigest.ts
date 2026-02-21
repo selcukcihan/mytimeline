@@ -4,7 +4,7 @@ import { buildDigestEmail } from '../email/buildDigestEmail';
 import { sendDigestEmail } from '../email/sendDigestEmail';
 import { parseTopics } from '../parsers';
 import { scoreTweets } from '../tweets/scoring';
-import { scrapeTimelineWithBrowser } from '../twitter/scrapeTimeline';
+import { ScrapeTimelineError, scrapeTimelineWithBrowser } from '../twitter/scrapeTimeline';
 import type { RunOptions, RunResult, RuntimeEnv } from '../types';
 
 export async function executeDigest(env: RuntimeEnv, options: RunOptions): Promise<RunResult> {
@@ -13,7 +13,19 @@ export async function executeDigest(env: RuntimeEnv, options: RunOptions): Promi
 		throw new Error('DIGEST_TOPICS is empty. Set at least one topic in wrangler vars.');
 	}
 
-	const tweets = await scrapeTimelineWithBrowser(env);
+	let tweets;
+	try {
+		tweets = await scrapeTimelineWithBrowser(env);
+	} catch (error) {
+		if (error instanceof ScrapeTimelineError) {
+			return {
+				status: 'failed',
+				error: error.message,
+				debug: error.diagnostics,
+			};
+		}
+		throw error;
+	}
 	if (tweets.length === 0) {
 		return { status: 'skipped', reason: 'no tweets captured' };
 	}
@@ -24,11 +36,26 @@ export async function executeDigest(env: RuntimeEnv, options: RunOptions): Promi
 	const email = buildDigestEmail(options, topics, selected, digest);
 
 	if (options.dryRun) {
+		const tweetById = new Map(candidates.map((tweet) => [tweet.id, tweet]));
 		return {
 			status: 'dry-run',
 			subject: email.subject,
 			inspectedTweets: tweets.length,
 			includedTweets: selected.length,
+			preview: {
+				summary: digest.summary,
+				highlights: digest.highlights.map((item) => ({
+					tweetId: item.tweet_id,
+					url: tweetById.get(item.tweet_id)?.url ?? '',
+					whyRelevant: item.why_relevant,
+					mainTakeaway: item.main_takeaway,
+				})),
+				articleLinks: digest.article_links.map((item) => ({
+					url: item.url,
+					whyRelevant: item.why_relevant,
+				})),
+				emailPlain: email.plain,
+			},
 		};
 	}
 

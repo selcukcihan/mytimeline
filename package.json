@@ -6,14 +6,18 @@
 		"deploy": "wrangler deploy",
 		"dev": "wrangler dev",
 		"start": "wrangler dev",
+		"bootstrap:x-cookies": "node scripts/bootstrap-x-cookies.mjs",
 		"test": "npm run test:unit",
 		"test:unit": "vitest run test/unit.spec.ts",
 		"test:e2e": "node --env-file=.env ./node_modules/vitest/vitest.mjs run -c vitest.e2e.config.mts test/e2e.real.spec.ts",
+		"test:e2e:business": "node --env-file=.env ./node_modules/vitest/vitest.mjs run -c vitest.e2e.config.mts test/e2e.business.inspect.spec.ts",
+		"test:e2e:scheduler": "node --env-file=.env ./node_modules/vitest/vitest.mjs run -c vitest.e2e.config.mts test/e2e.scheduler.inspect.spec.ts",
 		"cf-typegen": "wrangler types"
 	},
 	"devDependencies": {
 		"@cloudflare/vitest-pool-workers": "^0.12.4",
 		"@types/node": "^25.3.0",
+		"playwright": "^1.58.2",
 		"typescript": "^5.5.2",
 		"vitest": "~3.2.0",
 		"wrangler": "^4.67.0"
