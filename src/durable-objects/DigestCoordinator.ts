@@ -1,6 +1,6 @@
 import { Agent } from 'agents';
 import { RUN_LOCK_TTL_MS } from '../constants';
-import { executeDigest } from '../digest/executeDigest';
+import { executeBackfill, executeDigest } from '../digest/executeDigest';
 import type { DigestCoordinatorState, RunOptions, RunResult, RuntimeEnv } from '../types';
 
 export class DigestCoordinator extends Agent<RuntimeEnv, DigestCoordinatorState> {
@@ -10,6 +10,14 @@ export class DigestCoordinator extends Agent<RuntimeEnv, DigestCoordinatorState>
 	};
 
 	async runDailyDigest(options: RunOptions): Promise<RunResult> {
+		return this.runLocked(() => executeDigest(this.env, options));
+	}
+
+	async backfillRecentDays(options: RunOptions, days: number): Promise<RunResult> {
+		return this.runLocked(() => executeBackfill(this.env, options, days));
+	}
+
+	private async runLocked(task: () => Promise<RunResult>): Promise<RunResult> {
 		if (this.state.runLockUntil !== null && this.state.runLockUntil > Date.now()) {
 			return { status: 'skipped', reason: 'digest already running' };
 		}
@@ -20,7 +28,7 @@ export class DigestCoordinator extends Agent<RuntimeEnv, DigestCoordinatorState>
 		});
 
 		try {
-			const result = await executeDigest(this.env, options);
+			const result = await task();
 			this.setState({
 				...this.state,
 				runLockUntil: null,

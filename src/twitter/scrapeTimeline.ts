@@ -15,15 +15,25 @@ export class ScrapeTimelineError extends Error {
 }
 
 export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[]> {
+	return scrapeTimelineForDays(env, 1);
+}
+
+export async function scrapeTimelineForDays(env: RuntimeEnv, daysBack: number): Promise<Tweet[]> {
 	if (!env.BROWSER) {
 		throw new Error('BROWSER binding is not configured.');
 	}
 
 	const timelineUrl = env.TIMELINE_URL || DEFAULT_TIMELINE_URL;
-	const targetTweets = parsePositiveInt(env.TARGET_TWEET_COUNT, 70);
-	const scrollPasses = parsePositiveInt(env.SCROLL_PASSES, 7);
+	const isBackfill = daysBack > 1;
+	const targetTweets = isBackfill
+		? parsePositiveInt(env.BACKFILL_TARGET_TWEET_COUNT, 700)
+		: parsePositiveInt(env.TARGET_TWEET_COUNT, 120);
+	const scrollPasses = isBackfill
+		? Math.max(parsePositiveInt(env.BACKFILL_SCROLL_PASSES, 140), 20)
+		: Math.max(parsePositiveInt(env.SCROLL_PASSES, 20), 8);
 	const rawCookies = env.X_SESSION_COOKIES ?? process.env.X_SESSION_COOKIES;
 	const cookieList = parseCookieList(rawCookies);
+	const cutoffMs = Date.now() - Math.max(daysBack, 1) * 24 * 60 * 60 * 1000;
 
 	const browser = await puppeteer.launch(env.BROWSER);
 	try {
@@ -35,6 +45,7 @@ export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[
 
 		try {
 			await page.goto(timelineUrl, { waitUntil: 'networkidle2' });
+			await forceFollowingTab(page);
 			await page.waitForSelector('article[data-testid="tweet"]', { timeout: 30_000 });
 		} catch (error) {
 			const diagnostics = await collectDiagnostics(page, rawCookies, cookieList);
@@ -45,25 +56,102 @@ export async function scrapeTimelineWithBrowser(env: RuntimeEnv): Promise<Tweet[
 		}
 
 		const byId = new Map<string, Tweet>();
+		let reachedCutoff = false;
+		let noNewTweetPasses = 0;
 		for (let i = 0; i < scrollPasses; i += 1) {
+			const beforeSize = byId.size;
 			const batch = await extractTweetsFromPage(page);
 			for (const tweet of batch) {
 				byId.set(tweet.id, tweet);
+				if (tweet.postedAt) {
+					const timestamp = Date.parse(tweet.postedAt);
+					if (Number.isFinite(timestamp) && timestamp < cutoffMs) {
+						reachedCutoff = true;
+					}
+				}
 			}
+			if (byId.size === beforeSize) {
+				noNewTweetPasses += 1;
+			} else {
+				noNewTweetPasses = 0;
+			}
+
 			if (byId.size >= targetTweets) {
 				break;
 			}
+			if (reachedCutoff && noNewTweetPasses >= 3) {
+				break;
+			}
 
+			const beforeMetrics = await getTimelineMetrics(page);
 			await page.evaluate(() => {
 				window.scrollBy(0, document.body.scrollHeight * 0.75);
 			});
-			await sleep(1200);
+			await settleAfterScroll(page, beforeMetrics);
 		}
 
-		return Array.from(byId.values());
+		return Array.from(byId.values()).filter((tweet) => {
+			if (!tweet.postedAt) {
+				return false;
+			}
+			const timestamp = Date.parse(tweet.postedAt);
+			return Number.isFinite(timestamp) && timestamp >= cutoffMs;
+		});
 	} finally {
 		await browser.close();
 	}
+}
+
+async function forceFollowingTab(page: puppeteer.Page): Promise<void> {
+	await page.evaluate(() => {
+		const tabs = Array.from(document.querySelectorAll('[role="tab"], a'));
+		for (const tab of tabs) {
+			const text = (tab.textContent || '').trim().toLowerCase();
+			if (text === 'following') {
+				(tab as HTMLElement).click();
+				return;
+			}
+		}
+	});
+	await sleep(700);
+}
+
+interface TimelineMetrics {
+	articleCount: number;
+	scrollHeight: number;
+}
+
+async function getTimelineMetrics(page: puppeteer.Page): Promise<TimelineMetrics> {
+	return page.evaluate(() => ({
+		articleCount: document.querySelectorAll('article[data-testid="tweet"]').length,
+		scrollHeight: document.body?.scrollHeight ?? 0,
+	}));
+}
+
+async function settleAfterScroll(page: puppeteer.Page, before: TimelineMetrics): Promise<void> {
+	let stableChecks = 0;
+	let previous: TimelineMetrics = before;
+
+	for (let i = 0; i < 8; i += 1) {
+		await sleep(350);
+		const current = await getTimelineMetrics(page);
+		const changed =
+			current.articleCount !== previous.articleCount || current.scrollHeight !== previous.scrollHeight;
+
+		if (changed) {
+			stableChecks = 0;
+			previous = current;
+			continue;
+		}
+
+		stableChecks += 1;
+		if (stableChecks >= 3) {
+			break;
+		}
+	}
+
+	// Allow tweet internals (counts/media/time nodes) to hydrate after list stabilization.
+	await sleep(500);
 }
 
 async function collectDiagnostics(
@@ -106,6 +194,43 @@ async function collectDiagnostics(
 
 async function extractTweetsFromPage(page: puppeteer.Page): Promise<Tweet[]> {
 	const raw = await page.evaluate(() => {
+		const extractMedia = (
+			article: Element,
+		): Array<{ type: 'photo' | 'video'; url?: string; poster?: string; alt?: string }> => {
+			const media: Array<{ type: 'photo' | 'video'; url?: string; poster?: string; alt?: string }> =
+				[];
+
+			const images = Array.from(article.querySelectorAll<HTMLImageElement>('img[src]'));
+			for (const image of images) {
+				const src = image.src || '';
+				const alt = image.alt || '';
+				const isTweetPhoto = src.includes('pbs.twimg.com/media/');
+				const isAvatar = src.includes('profile_images') || alt.toLowerCase().includes('avatar');
+				if (isTweetPhoto && !isAvatar) {
+					media.push({ type: 'photo', url: src, alt });
+				}
+			}
+
+			const videos = Array.from(article.querySelectorAll<HTMLVideoElement>('video'));
+			for (const video of videos) {
+				const poster = video.getAttribute('poster') || '';
+				const source = video.querySelector('source')?.getAttribute('src') || undefined;
+				if (poster || source) {
+					media.push({ type: 'video', poster: poster || undefined, url: source });
+				}
+			}
+
+			const seen = new Set<string>();
+			return media.filter((item) => {
+				const key = `${item.type}:${item.url || ''}:${item.poster || ''}`;
+				if (seen.has(key)) {
+					return false;
+				}
+				seen.add(key);
+				return true;
+			});
+		};
+
 		const articles = Array.from(document.querySelectorAll('article[data-testid="tweet"]'));
 		return articles
 			.map((article) => {
@@ -121,6 +246,7 @@ async function extractTweetsFromPage(page: puppeteer.Page): Promise<Tweet[]> {
 					?.trim() ?? '';
 				const postedAt =
 					article.querySelector<HTMLTimeElement>('time')?.getAttribute('datetime') ?? null;
+				const media = extractMedia(article);
 
 				const getAriaLabel = (testId: string): string => {
 					const control = article.querySelector<HTMLElement>(`[data-testid="${testId}"]`);
@@ -136,6 +262,7 @@ async function extractTweetsFromPage(page: puppeteer.Page): Promise<Tweet[]> {
 					userNameText,
 					handle,
 					postedAt,
+					media,
 					repliesLabel: getAriaLabel('reply'),
 					repostsLabel: getAriaLabel('retweet'),
 					likesLabel: getAriaLabel('like'),
@@ -152,6 +279,7 @@ async function extractTweetsFromPage(page: puppeteer.Page): Promise<Tweet[]> {
 		author: row.userNameText,
 		handle: row.handle,
 		postedAt: row.postedAt,
+		media: row.media,
 		replies: parseEngagementCount(row.repliesLabel),
 		reposts: parseEngagementCount(row.repostsLabel),
 		likes: parseEngagementCount(row.likesLabel),

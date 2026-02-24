@@ -15,7 +15,7 @@ maybeDescribe('e2e (real resources)', () => {
 					'Content-Type': 'application/json',
 				},
 				body: JSON.stringify({
-					model: 'gpt-4.1-mini',
+					model: 'gpt-5-nano',
 					messages: [{ role: 'user', content: 'Reply with the single word: ok' }],
 					temperature: 0,
 				}),

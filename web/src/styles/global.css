@@ -1,0 +1,12 @@
+@import "tailwindcss";
+
+@theme {
+	--color-app-bg: #000000;
+	--color-panel: #15181c;
+	--color-panel-soft: #1d2228;
+	--color-border: #2f3336;
+	--color-text-main: #e7e9ea;
+	--color-text-soft: #71767b;
+	--color-accent: #1d9bf0;
+	--color-accent-soft: #0f2233;
+}

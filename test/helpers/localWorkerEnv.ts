@@ -27,6 +27,17 @@ export async function loadRuntimeSecrets(): Promise<WorkerRuntimeSecrets | null>
 	};
 }
 
+export function getOptionalWorkerVars(): Record<string, string> {
+	const vars: Record<string, string> = {};
+	for (const key of ['PERSIST_DRY_RUN', 'DIGEST_TIMEZONE']) {
+		const value = process.env[key];
+		if (value) {
+			vars[key] = value;
+		}
+	}
+	return vars;
+}
+
 export async function setupDevVars(vars: Record<string, string>): Promise<() => Promise<void>> {
 	const hadExisting = await fileExists(DEV_VARS_PATH);
 	if (hadExisting) {

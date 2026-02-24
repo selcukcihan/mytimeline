@@ -2,26 +2,28 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { getOptionalWorkerVars, loadRuntimeSecrets, setupDevVars } from './helpers/localWorkerEnv';
+import { loadRuntimeSecrets, setupDevVars } from './helpers/localWorkerEnv';
 
 const runtimeSecrets = await loadRuntimeSecrets();
 const maybeDescribe = runtimeSecrets ? describe : describe.skip;
 
-const TEST_PORT = 8792;
+const TEST_PORT = 8793;
 const BASE_URL = `http://127.0.0.1:${TEST_PORT}`;
-const ARTIFACT_DIR = join(process.cwd(), 'artifacts', 'business-run-inspection');
+const ARTIFACT_DIR = join(process.cwd(), 'artifacts', 'backfill-inspection');
 
 let devServer: ChildProcessWithoutNullStreams | null = null;
 let cleanupDevVars: (() => Promise<void>) | null = null;
 
-maybeDescribe('e2e business run inspection', () => {
+maybeDescribe('e2e backfill inspection', () => {
 	beforeAll(async () => {
 		cleanupDevVars = await setupDevVars({
 			OPENAI_API_KEY: runtimeSecrets!.openAiApiKey,
 			ADMIN_TOKEN: runtimeSecrets!.adminToken,
 			X_SESSION_COOKIES: runtimeSecrets!.xSessionCookies,
 			SCHEDULED_DRY_RUN: '1',
-			...getOptionalWorkerVars(),
+			PERSIST_DRY_RUN: '1',
+			TARGET_TWEET_COUNT: '220',
+			SCROLL_PASSES: '45',
 		});
 
 		devServer = spawn('npx', ['wrangler', 'dev', '--port', String(TEST_PORT), '--log-level', 'error'], {
@@ -45,32 +47,28 @@ maybeDescribe('e2e business run inspection', () => {
 	});
 
 	it(
-		'triggers local business logic run and writes an inspection artifact',
-		{ timeout: 240_000 },
+		'runs 3-day backfill and writes inspection artifact',
+		{ timeout: 360_000 },
 		async () => {
-			const runResponse = await fetch(`${BASE_URL}/run?dryRun=1`, {
+			const response = await fetch(`${BASE_URL}/backfill?days=3&dryRun=1`, {
 				method: 'POST',
 				headers: {
 					'x-admin-token': runtimeSecrets!.adminToken,
 				},
 			});
-			expect(runResponse.ok).toBe(true);
-			const runPayload = (await runResponse.json()) as unknown;
+			expect(response.ok).toBe(true);
+			const payload = (await response.json()) as unknown;
 
-			const lastRunResponse = await fetch(`${BASE_URL}/last-run`, {
-				headers: {
-					'x-admin-token': runtimeSecrets!.adminToken,
-				},
-			});
-			expect(lastRunResponse.ok).toBe(true);
-			const lastRunPayload = (await lastRunResponse.json()) as unknown;
+			const daysResponse = await fetch(`${BASE_URL}/api/days`);
+			expect(daysResponse.ok).toBe(true);
+			const dayPayload = (await daysResponse.json()) as unknown;
 
 			await mkdir(ARTIFACT_DIR, { recursive: true });
-			const filename = `business-run-${new Date().toISOString().replaceAll(':', '-')}.md`;
-			const outputPath = join(ARTIFACT_DIR, filename);
-			await writeFile(outputPath, renderMarkdown(runPayload, lastRunPayload), 'utf8');
+			const filename = `backfill-run-${new Date().toISOString().replaceAll(':', '-')}.md`;
+			const path = join(ARTIFACT_DIR, filename);
+			await writeFile(path, renderMarkdown(payload, dayPayload), 'utf8');
 
-			expect(typeof runPayload).toBe('object');
+			expect(typeof payload).toBe('object');
 		},
 	);
 });
@@ -78,7 +76,6 @@ maybeDescribe('e2e business run inspection', () => {
 async function waitForHealth(): Promise<void> {
 	const timeoutMs = 60_000;
 	const startedAt = Date.now();
-
 	for (;;) {
 		try {
 			const response = await fetch(`${BASE_URL}/health`);
@@ -86,9 +83,8 @@ async function waitForHealth(): Promise<void> {
 				return;
 			}
 		} catch {
-			// Keep polling until timeout.
+			// retry
 		}
-
 		if (Date.now() - startedAt >= timeoutMs) {
 			throw new Error('Timed out waiting for wrangler dev health endpoint.');
 		}
@@ -96,22 +92,22 @@ async function waitForHealth(): Promise<void> {
 	}
 }
 
-function renderMarkdown(runPayload: unknown, lastRunPayload: unknown): string {
+function renderMarkdown(backfillPayload: unknown, daysPayload: unknown): string {
 	return [
-		'# Business Run Inspection Report',
+		'# Backfill Inspection Report',
 		'',
 		`Generated at: ${new Date().toISOString()}`,
 		'',
-		'## POST /run?dryRun=1 Payload',
+		'## POST /backfill?days=3&dryRun=1 Payload',
 		'',
 		'```json',
-		JSON.stringify(runPayload, null, 2),
+		JSON.stringify(backfillPayload, null, 2),
 		'```',
 		'',
-		'## GET /last-run Payload',
+		'## GET /api/days Payload',
 		'',
 		'```json',
-		JSON.stringify(lastRunPayload, null, 2),
+		JSON.stringify(daysPayload, null, 2),
 		'```',
 		'',
 	].join('\n');

@@ -13,6 +13,10 @@
 	"compatibility_flags": [
 		"nodejs_compat"
 	],
+	"assets": {
+		"binding": "ASSETS",
+		"directory": "./web/dist"
+	},
 	"triggers": {
 		"crons": [
 			"0 13 * * *"
@@ -24,6 +28,14 @@
 	"send_email": [
 		{
 			"name": "DIGEST_EMAIL"
+		}
+	],
+	"d1_databases": [
+		{
+			"binding": "TIMELINE_DB",
+			"database_name": "mytimeline",
+			"database_id": "00000000-0000-0000-0000-000000000000",
+			"preview_database_id": "00000000-0000-0000-0000-000000000000"
 		}
 	],
 	"durable_objects": {
@@ -43,11 +55,15 @@
 		}
 	],
 	"vars": {
-		"DIGEST_TOPICS": "ai, cloudflare, startups, devtools",
-		"TIMELINE_URL": "https://x.com/home",
+		"DIGEST_TOPICS": "software development, cloud services, devtools, startups, open source, AI-assisted development, engineering management, indie hackers, operating systems, distributed systems",
+		"TIMELINE_URL": "https://x.com/home?f=following",
 		"TARGET_TWEET_COUNT": "70",
 		"SCROLL_PASSES": "7",
-		"OPENAI_MODEL": "gpt-4.1-mini",
+		"OPENAI_MODEL": "gpt-5-nano",
+		"DIGEST_TIMEZONE": "UTC",
+		"BACKFILL_TARGET_TWEET_COUNT": "700",
+		"BACKFILL_SCROLL_PASSES": "140",
+		"PERSIST_DRY_RUN": "0",
 		"SCHEDULED_DRY_RUN": "0",
 		"DIGEST_SENDER": "digest@example.com",
 		"DIGEST_RECIPIENT": "digest@example.com"

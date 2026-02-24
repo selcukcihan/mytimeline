@@ -1,35 +1,37 @@
-import type { OpenAIDigestResponse, RuntimeEnv, Tweet } from '../types';
+import type { OpenAIDayDigestResponse, RuntimeEnv, Tweet } from '../types';
 
-export async function buildDigestWithOpenAI(
+export async function buildDayDigestWithOpenAI(
 	env: RuntimeEnv,
+	day: string,
 	tweets: Tweet[],
 	topics: string[],
-): Promise<OpenAIDigestResponse> {
+): Promise<OpenAIDayDigestResponse> {
 	const key = env.OPENAI_API_KEY;
 	if (!key) {
 		throw new Error('OPENAI_API_KEY is missing.');
 	}
 
-	const model = env.OPENAI_MODEL || 'gpt-4.1-mini';
+	const model = env.OPENAI_MODEL || 'gpt-5-nano';
 	const payload = {
 		model,
 		messages: [
 			{
 				role: 'system',
 				content:
-					'You produce concise daily intelligence digests from timeline posts. Focus on signal, not noise.',
+					'You evaluate tweets for topic relevance and produce a concise daily digest. Return valid JSON only.',
 			},
 			{
 				role: 'user',
 				content: JSON.stringify({
+					day,
 					topics,
-					max_items: 10,
 					tweets: tweets.map((tweet) => ({
 						id: tweet.id,
 						url: tweet.url,
 						text: tweet.text,
 						author: tweet.author,
 						handle: tweet.handle,
+						posted_at: tweet.postedAt,
 						likes: tweet.likes,
 						reposts: tweet.reposts,
 						replies: tweet.replies,
@@ -37,11 +39,12 @@ export async function buildDigestWithOpenAI(
 						score: tweet.score,
 					})),
 					instructions: [
-						'Select only tweets relevant to the requested topics.',
-						'Use engagement and content quality as signal.',
-						'Summarize what matters for a daily brief.',
-						'If no relevant tweets exist, return empty highlights and explain why.',
-						'Identify links that look like articles/posts worth opening separately.',
+						'For every tweet, emit one decision object in decisions.',
+						'Set relevant true only when useful for topics.',
+						'Use relevance_score from 0 to 100.',
+						'For irrelevant tweets, keep concise why_relevant and main_takeaway.',
+						'Write subject and summary for this day based on relevant tweets.',
+						'If no relevant tweets, still return decisions and a short summary explaining low-signal day.',
 					],
 				}),
 			},
@@ -49,25 +52,33 @@ export async function buildDigestWithOpenAI(
 		response_format: {
 			type: 'json_schema',
 			json_schema: {
-				name: 'digest',
+				name: 'day_digest',
 				strict: true,
 				schema: {
 					type: 'object',
 					additionalProperties: false,
-					required: ['subject', 'summary', 'highlights', 'article_links'],
+					required: ['subject', 'summary', 'decisions', 'article_links'],
 					properties: {
 						subject: { type: 'string' },
 						summary: { type: 'string' },
-						highlights: {
+						decisions: {
 							type: 'array',
 							items: {
 								type: 'object',
 								additionalProperties: false,
-								required: ['tweet_id', 'why_relevant', 'main_takeaway'],
+								required: [
+									'tweet_id',
+									'relevant',
+									'why_relevant',
+									'main_takeaway',
+									'relevance_score',
+								],
 								properties: {
 									tweet_id: { type: 'string' },
+									relevant: { type: 'boolean' },
 									why_relevant: { type: 'string' },
 									main_takeaway: { type: 'string' },
+									relevance_score: { type: 'number' },
 								},
 							},
 						},
@@ -114,24 +125,9 @@ export async function buildDigestWithOpenAI(
 		throw new Error('OpenAI response did not include JSON content.');
 	}
 
-	const parsed = JSON.parse(content) as OpenAIDigestResponse;
-	if (!parsed.subject || !parsed.summary) {
-		throw new Error('OpenAI response is missing required digest fields.');
+	const parsed = JSON.parse(content) as OpenAIDayDigestResponse;
+	if (!parsed.subject || !parsed.summary || !Array.isArray(parsed.decisions)) {
+		throw new Error('OpenAI day digest response is missing required fields.');
 	}
 	return parsed;
-}
-
-export function selectHighlightedTweets(
-	tweets: Tweet[],
-	highlights: OpenAIDigestResponse['highlights'],
-): Tweet[] {
-	const byId = new Map(tweets.map((tweet) => [tweet.id, tweet]));
-	const selected: Tweet[] = [];
-	for (const highlight of highlights) {
-		const tweet = byId.get(highlight.tweet_id);
-		if (tweet) {
-			selected.push(tweet);
-		}
-	}
-	return selected;
 }

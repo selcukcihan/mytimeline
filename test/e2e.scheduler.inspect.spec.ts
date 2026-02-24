@@ -2,7 +2,7 @@ import { spawn, type ChildProcessWithoutNullStreams } from 'node:child_process';
 import { mkdir, writeFile } from 'node:fs/promises';
 import { join } from 'node:path';
 import { afterAll, beforeAll, describe, expect, it } from 'vitest';
-import { loadRuntimeSecrets, setupDevVars } from './helpers/localWorkerEnv';
+import { getOptionalWorkerVars, loadRuntimeSecrets, setupDevVars } from './helpers/localWorkerEnv';
 
 const runtimeSecrets = await loadRuntimeSecrets();
 const maybeDescribe = runtimeSecrets ? describe : describe.skip;
@@ -21,6 +21,7 @@ maybeDescribe('e2e scheduler inspection', () => {
 			ADMIN_TOKEN: runtimeSecrets!.adminToken,
 			X_SESSION_COOKIES: runtimeSecrets!.xSessionCookies,
 			SCHEDULED_DRY_RUN: '1',
+			...getOptionalWorkerVars(),
 		});
 
 		devServer = spawn(
